@@ -3,3 +3,302 @@
 <!-- // - // -->
 
 <!-- - ps you can read the ReadMe.txt file for info on this project - -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Bubbele</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
+<style>
+  :root { --card-bg: #fff; --page-bg: #f5f5f5; --text: #333; }
+  body {
+    font-family: Arial, sans-serif;
+    background: var(--page-bg);
+    color: var(--text);
+    text-align: center;
+    padding: 20px;
+    transition: background .5s ease, color .5s ease, background-image .5s ease;
+    background-size: cover;
+    background-position: center;
+    min-height: 100vh;
+  }
+  .hidden { display:none; }
+  #toggle-theme, #open-settings {
+    cursor: pointer;
+    font-size: 24px;
+    position: absolute;
+    top: 10px;
+  }
+  #toggle-theme { right: 10px; }
+  #open-settings { left: 10px; }
+  #search { margin: 20px; padding:10px; width:200px; border-radius:10px; border:1px solid #ccc; background:white; color: #333; transition: all .3s ease; }
+  #search:focus { box-shadow:0 0 10px rgba(0,0,0,.2); transform: scale(1.02); }
+  #word-list div { padding:10px; border-bottom:1px solid #ccc; border-radius:5px; background:var(--card-bg); color:var(--text); transition: background .3s, color .3s; text-align:left; }
+  #word-list div:hover { background:#e9e9e9; }
+  .card { background: var(--card-bg); padding:20px; border-radius:15px; max-width:800px; margin:20px auto; transition: background .5s, color .5s; text-align:left; }
+  #settings-panel { display:none; text-align:left; }
+  #settings-panel label { display:block; margin:10px 0; }
+  input[type=file] { display:block; margin-top:5px; }
+  /* Dark mode */
+  .dark-mode { --card-bg:#1f1f1f; --page-bg:#121212; --text:#ddd; }
+  .anime-mode { background: url('https://ih1.redbubble.net/image.5553081405.8622/bg,f8f8f8-flat,750x,075,f-pad,750x1000,f8f8f8.jpg') no-repeat center center fixed; background-size:cover; color:#fff; }
+  .anime-mode .card, .anime-mode #settings-panel { background: rgba(0,0,0,0.6); color:#fff; }
+  /* Modal styles */
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:9999; }
+  .modal { background:#fff; border-radius:12px; padding:20px; width:320px; max-width:90%; text-align:center; }
+  .modal h2 { margin-top:0; }
+  .btn { padding:8px 14px; border-radius:8px; border: none; cursor:pointer; margin:6px; }
+  .btn-primary { background:#007bff; color:#fff; }
+  .btn-ghost { background:#f1f1f1; color:#333; }
+  .error { color:#ff5555; margin-top:8px; }
+  @media (max-width:600px){ #search{ width:100%; } }
+</style>
+</head>
+<body>
+
+<!-- MODAL: Ask School or Home -->
+<div id="choice-modal" class="modal-backdrop">
+  <div class="modal">
+    <h2>Quick question</h2>
+    <p>Are you on a <b>school computer</b> or <b>home computer</b>?</p>
+    <div>
+      <button class="btn btn-primary" onclick="chooseVariant('school')">School computer</button>
+      <button class="btn btn-ghost" onclick="chooseVariant('home')">Home computer</button>
+    </div>
+    <p style="font-size:12px; margin-top:10px;">(This decides which variant of the site you see.)</p>
+  </div>
+</div>
+
+<!-- AUTH -->
+<div id="auth-section" class="card hidden">
+  <h2>Enter Password to Access</h2>
+  <input type="password" id="password-input" placeholder="Enter password" />
+  <button class="btn btn-primary" id="submit-password">Submit</button>
+  <p id="error-message" class="error"></p>
+</div>
+
+<!-- MAIN CONTENT -->
+<div id="content" class="hidden card">
+  <span id="open-settings" title="Settings"><i class="fas fa-cog"></i></span>
+  <span id="toggle-theme" title="Toggle theme"><i class="fas fa-moon"></i></span>
+
+  <h1 id="page-title">Welcome to the language list of Bubbele</h1>
+  <small id="page-subtitle">This subtitle will change depending on the variant you picked.</small>
+
+  <input type="text" id="search" onkeyup="searchWords()" placeholder="Search words..." />
+  <div id="word-list"></div>
+
+  <small style="display:block; margin-top:10px;">
+    All words have been verified by either <b>brug_nubmer</b>, <b>jmart89000</b>, or <b>masternorac/glitch</b> :3  
+    <br>Server link btw :) <a href="https://discord.gg/XQRcY5YYRd" target="_blank">Join Discord Server</a>
+  </small>
+</div>
+
+<!-- SETTINGS PANEL -->
+<div id="settings-panel" class="card hidden">
+  <h3>⚙️ Settings</h3>
+  <label><input type="radio" name="theme" value="light" checked> Light Mode</label>
+  <label><input type="radio" name="theme" value="dark"> Dark Mode</label>
+  <label><input type="radio" name="theme" value="anime"> Anime Mode</label>
+
+  <label>
+    Custom Background Image:
+    <input type="file" id="bg-upload" accept="image/*">
+  </label>
+  <button class="btn btn-ghost" onclick="closeSettings()">Close</button>
+</div>
+
+<script>
+/*
+  Behaviour:
+  - On load: the modal (#choice-modal) asks school/home.
+  - chooseVariant('school'|'home') sets window.VARIANT then shows auth section.
+  - Password verification is done server-side via POST /verify-password
+    payload: { password: "...", variant: "school" }
+    response: { ok: true } or { ok: false, message: "incorrect" }
+  - Word lists for the two variants are kept in separate arrays below.
+*/
+
+/* ---------- Word lists for each variant (copied from your two scripts) ---------- */
+const wordListSchool = [
+  { word: "ki", definition: "Hi", pronounced: "KI KI MA MA I AM FIRE JASON" },
+  { word: "Shu", definition: "You", pronounced: "shh - ou" },
+  { word: "karata", definition: "How are you doing", pronounced: "kara - ta" },
+  { word: "Si", definition: "Good", pronounced: "See" },
+  { word: "Noki", definition: "Face", pronounced: "No - ke" },
+  { word: "Shi", definition: "B123h", pronounced: "shi" },
+  { word: "koro", definition: "S21t", pronounced: "co - row" },
+  { word: "o", definition: "A", pronounced: "(simple enough ;-;)" },
+  { word: "uoj", definition: "Fudge", pronounced: "ue - j" },
+  { word: "Ren", definition: "Create", pronounced: "Re - en" },
+  { word: "enzu", definition: "azz", pronounced: "eh - n - zu" },
+  { word: "koi", definition: "Bye", pronounced: "co - oi" },
+  { word: "lok", definition: "Nah", pronounced: "low - ck" },
+  { word: "onimi", definition: "Anime", pronounced: "on - im - me" },
+  { word: "koa", definition: "What", pronounced: "co - ah" },
+  { word: "nokoro", definition: "Dipsh1p", pronounced: "No - ko - or - o" },
+  { word: "hishquendelag", definition: "Shut the Fudge up", pronounced: "heish - kwin - dalag" },
+  { word: "Kwins", definition: "Twin", pronounced: "kw - in (The S is silent)" },
+  { word: "vrko", definition: "KYS", pronounced: "vur - ko" },
+  { word: "bau", definition: "Team", pronounced: "ba - ow" },
+  { word: "idi", definition: "No", pronounced: "id - ie" },
+  { word: "slumk", definition: "slvt", pronounced: "sl - um - k" }
+];
+
+const wordListHome = [
+  { word: "ki", definition: "Hi", pronounced: "KI KI MA MA I AM FIRE JASON" },
+  { word: "Shu", definition: "You", pronounced: "shh - ou" },
+  { word: "karata", definition: "How are you doing", pronounced: "kara - ta" },
+  { word: "Si", definition: "Good", pronounced: "See" },
+  { word: "Noki", definition: "Face", pronounced: "No - ke" },
+  { word: "Shi", definition: "Bitch", pronounced: "shi" },
+  { word: "koro", definition: "Shit", pronounced: "co - row" },
+  { word: "o", definition: "A", pronounced: "(simple enough ;-;)" },
+  { word: "uoj", definition: "Fuck", pronounced: "ue - j" },
+  { word: "Ren", definition: "Create", pronounced: "Re - en" },
+  { word: "enzu", definition: "Ass", pronounced: "eh - n - zu" },
+  { word: "koi", definition: "Bye", pronounced: "co - oi" },
+  { word: "lok", definition: "Nah", pronounced: "low - ck" },
+  { word: "onimi", definition: "Anime", pronounced: "on - im - me" },
+  { word: "koa", definition: "What", pronounced: "co - ah" },
+  { word: "nokoro", definition: "Dipshit", pronounced: "No - ko - or - o" },
+  { word: "hishquendelag", definition: "Shut the fuck up", pronounced: "heish - kwin - dalag" },
+  { word: "Kwins", definition: "Twin", pronounced: "kw - in (The S is silent)" },
+  { word: "vrko", definition: "KYS", pronounced: "vur - ko" },
+  { word: "bau", definition: "Team", pronounced: "ba - ow" },
+  { word: "idi", definition: "No", pronounced: "id - ie" },
+  { word: "slumk", definition: "slut", pronounced: "sl - um - k" }
+];
+
+/* ---------- UI & state ---------- */
+let VARIANT = null; // 'school' or 'home'
+const choiceModal = document.getElementById('choice-modal');
+const authSection = document.getElementById('auth-section');
+const content = document.getElementById('content');
+const settingsPanel = document.getElementById('settings-panel');
+const wordListDiv = document.getElementById('word-list');
+const errorMessage = document.getElementById('error-message');
+const pageTitle = document.getElementById('page-title');
+const pageSubtitle = document.getElementById('page-subtitle');
+
+/* Called when the user chooses variant on modal */
+function chooseVariant(name) {
+  VARIANT = name; // "school" or "home"
+  // hide modal
+  choiceModal.classList.add('hidden');
+  // show auth
+  authSection.classList.remove('hidden');
+  // do some small customization for the variant:
+  if (VARIANT === 'school') {
+    pageSubtitle.innerText = "ATLEAST BUBBELE CAN BE ON CHROMEBOOKS! PS: the full version with... the words uncensored can be found on the actual Github page! :3";
+  } else {
+    pageSubtitle.innerText = "be a good boy for mommy :3";
+  }
+}
+
+/* Password submit handler: send password to server for verification */
+document.getElementById('submit-password').addEventListener('click', async () => {
+  errorMessage.innerText = '';
+  const pwd = document.getElementById('password-input').value;
+  if (!pwd) { errorMessage.innerText = 'Please enter a password.'; return; }
+
+  try {
+    const resp = await fetch('/verify-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd, variant: VARIANT })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // hide auth, show content
+      authSection.classList.add('hidden');
+      content.classList.remove('hidden');
+      // clear password field (so it's not stored in DOM) and remove it for safety
+      document.getElementById('password-input').value = '';
+      document.getElementById('password-input').setAttribute('disabled','true');
+      document.getElementById('submit-password').setAttribute('disabled','true');
+      loadWords();
+    } else {
+      errorMessage.innerText = data.message || 'Incorrect password. Try again.';
+    }
+  } catch (err) {
+    console.error(err);
+    errorMessage.innerText = 'Could not verify password (network error).';
+  }
+});
+
+/* Load words according to variant */
+function loadWords() {
+  wordListDiv.innerHTML = '';
+  const list = VARIANT === 'school' ? wordListSchool : wordListHome;
+  list.forEach(item => {
+    const div = document.createElement('div');
+    div.innerHTML = `<strong>${escapeHtml(item.word)}</strong> — ${escapeHtml(item.definition)} <br><small><i>${escapeHtml(item.pronounced)}</i></small>`;
+    wordListDiv.appendChild(div);
+  });
+}
+
+/* Search */
+function searchWords() {
+  const input = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll("#word-list div").forEach(div => {
+    div.style.display = div.innerText.toLowerCase().includes(input) ? "block" : "none";
+  });
+}
+
+/* Theme toggle */
+const toggleTheme = document.getElementById('toggle-theme');
+toggleTheme.addEventListener('click', () => {
+  const isDark = document.body.classList.toggle('dark-mode');
+  document.body.classList.remove('anime-mode');
+  toggleTheme.innerHTML = isDark ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+});
+
+/* Settings open/close */
+document.getElementById('open-settings').onclick = () => {
+  settingsPanel.style.display = 'block';
+  settingsPanel.classList.remove('hidden');
+};
+function closeSettings() {
+  settingsPanel.style.display = 'none';
+}
+
+/* Theme radio buttons in settings */
+document.querySelectorAll('input[name="theme"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    const val = e.target.value;
+    document.body.classList.remove('dark-mode', 'anime-mode');
+    document.body.style.backgroundImage = "";
+    if (val === "dark") document.body.classList.add("dark-mode");
+    else if (val === "anime") document.body.classList.add("anime-mode");
+  });
+});
+
+/* Custom background upload */
+document.getElementById('bg-upload').addEventListener('change', (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      document.body.style.backgroundImage = `url('${e.target.result}')`;
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
+/* small helper to escape HTML when injecting text */
+function escapeHtml(text) {
+  return (text+'').replace(/[&<>"']/g, function(m) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;' }[m];
+  });
+}
+
+/* Intercept Enter key on password input */
+document.getElementById('password-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('submit-password').click();
+});
+</script>
+</body>
+</html>
